@@ -13,11 +13,11 @@ import (
 )
 
 var (
-	collection = os.Getenv("COLLECTION")
-	mongoDB    = os.Getenv("MONGO_DB")
-	mongoURI   = os.Getenv("MONGO_URI")
-	port, _    = strconv.Atoi(os.Getenv("PT_PORT"))
-	remote     = papertrail.Writer{
+	mongoCollection = os.Getenv("MONGO_COLLECTION")
+	mongoDB         = os.Getenv("MONGO_DB")
+	mongoURI        = os.Getenv("MONGO_URI")
+	port, _         = strconv.Atoi(os.Getenv("PT_PORT"))
+	remote          = papertrail.Writer{
 		Port:    port,
 		Network: papertrail.UDP,
 		Server:  os.Getenv("PT_SERVER"),
@@ -26,20 +26,41 @@ var (
 )
 
 type record struct {
-	id   bson.ObjectId `bson:"_id"`
-	hits int
-	url  string
-	uuid string
+	ID   bson.ObjectId `bson:"_id"`
+	Hits int           `json:"hits"`
+	URL  string        `json:"url"`
+	UUID string        `json:"uuid"`
+}
+
+func main() {
+	middleware := dbMiddleware()
+	router := gin.Default()
+	router.Use(middleware)
+	router.GET("/:uuid", redirect)
+	router.Run(":8080")
+}
+
+func dbMiddleware() gin.HandlerFunc {
+	if session, err := mgo.Dial(mongoURI); err != nil {
+		panic(err)
+	} else {
+		return func(ctx *gin.Context) {
+			copy := session.Copy()
+			defer copy.Close()
+			ctx.Set("collection", copy.DB(mongoDB).C(mongoCollection))
+			ctx.Next()
+		}
+	}
 }
 
 func redirect(ctx *gin.Context) {
-	collection := ctx.MustGet("database").(*mgo.Collection)
+	collection := ctx.MustGet("collection").(*mgo.Collection)
 	var result record
 	if err := collection.Find(bson.M{"uuid": ctx.Param("uuid")}).One(&result); err != nil {
-		defer logger.Printf("jre[dot]villas/%s - 404 not found", ctx.Param("uuid"))
+		defer logger.Printf("jre[dot]villas/%s - 404 not found\n", ctx.Param("uuid"))
 		ctx.String(http.StatusNotFound, "404 not found")
 	} else {
-		defer logger.Printf("jre[dot]villas/%s - %s", ctx.Param("uuid"), result.url)
-		ctx.Redirect(http.StatusFound, result.url)
+		defer logger.Printf("jre[dot]villas/%s - %s\n", ctx.Param("uuid"), result.URL)
+		ctx.Redirect(http.StatusFound, result.URL)
 	}
 }

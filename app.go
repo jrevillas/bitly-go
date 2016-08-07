@@ -16,13 +16,9 @@ var (
 	mongoCollection = os.Getenv("MONGO_COLLECTION")
 	mongoDB         = os.Getenv("MONGO_DB")
 	mongoURI        = os.Getenv("MONGO_URI")
-	port, _         = strconv.Atoi(os.Getenv("PT_PORT"))
-	remote          = papertrail.Writer{
-		Port:    port,
-		Network: papertrail.UDP,
-		Server:  os.Getenv("PT_SERVER"),
-	}
-	logger = log.New(&remote, "", log.LstdFlags)
+	ptPort          = os.Getenv("PT_PORT")
+	ptServer        = os.Getenv("PT_SERVER")
+	runAddress      = os.Getenv("RUN_ADDRESS")
 )
 
 type record struct {
@@ -32,12 +28,23 @@ type record struct {
 	UUID string        `json:"uuid"`
 }
 
+func atoi(str string) int {
+	n, _ := strconv.Atoi(str)
+	return n
+}
+
 func main() {
+	remote := papertrail.Writer{
+		Port:    atoi(ptPort),
+		Network: papertrail.UDP,
+		Server:  ptServer,
+	}
+	log.SetOutput(&remote)
 	middleware := dbMiddleware()
 	router := gin.Default()
 	router.Use(middleware)
 	router.GET("/:uuid", redirect)
-	router.Run(":8080")
+	router.Run(runAddress)
 }
 
 func dbMiddleware() gin.HandlerFunc {
@@ -57,10 +64,10 @@ func redirect(ctx *gin.Context) {
 	collection := ctx.MustGet("collection").(*mgo.Collection)
 	var result record
 	if err := collection.Find(bson.M{"uuid": ctx.Param("uuid")}).One(&result); err != nil {
-		defer logger.Printf("jre[dot]villas/%s - 404 not found\n", ctx.Param("uuid"))
 		ctx.String(http.StatusNotFound, "404 not found")
-	} else {
-		defer logger.Printf("jre[dot]villas/%s - %s\n", ctx.Param("uuid"), result.URL)
-		ctx.Redirect(http.StatusFound, result.URL)
+		log.Printf("jre[dot]villas/%s - 404 not found\n", ctx.Param("uuid"))
+		return
 	}
+	ctx.Redirect(http.StatusFound, result.URL)
+	log.Printf("jre[dot]villas/%s - %s\n", ctx.Param("uuid"), result.URL)
 }
